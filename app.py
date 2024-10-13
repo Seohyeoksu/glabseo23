@@ -1,166 +1,135 @@
-import os
-from openai import OpenAI
+import openai
 import streamlit as st
-import pandas as pd
+from difflib import SequenceMatcher
+import streamlit.components.v1 as components
 
-os.environ["OPENAI_API_KEY"] = st.secrets['API_KEY']
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-st.set_page_config(
-    page_title="유아 놀이 관찰 기록 문장 생성 🎨",
-    page_icon="🎨",
-    layout="centered",
-    initial_sidebar_state="auto",
-)
- 
-# Custom CSS for a child-friendly UI
+# OpenAI API 키 설정
+openai.api_key = st.secrets['API_KEY']
+
+# 초기 대본 정의
+initial_script = [
+    "Narrator: It's a beautiful fall morning on the farm.",
+    "Narrator: The leaves are turning yellow and red.",
+    "Narrator: Fern comes to visit Wilbur, her favorite pig.",
+    "Fern: Good morning, Wilbur! How are you today?",
+    "Wilbur: Oh, Fern! I'm so happy to see you. I was feeling a little lonely.",
+    "Fern: Don't be lonely, Wilbur. You have so many friends here on the farm!",
+    "Charlotte: Good morning, Fern. You're right, Wilbur has many friends, including me.",
+    "Wilbur: Charlotte! I'm so glad you're here. Fern, isn't Charlotte amazing? She can make the most beautiful webs."
+]
+
+if 'current_line' not in st.session_state:
+    st.session_state.current_line = 0
+if 'conversation_history' not in st.session_state:
+    st.session_state.conversation_history = []
+
 st.markdown("""
-    <style>
-        .main {
-            background-color: #fffbe7;
-            font-family: 'Comic Sans MS', cursive, sans-serif;
-        }
-        h1 {
-            color: #ff6347;
-            text-align: center;
-            font-family: 'Comic Sans MS', cursive, sans-serif;
-            font-size: 2.5em;
-        }
-        .instructions {
-            background-color: #ffebcd;
-            padding: 15px;
-            border-radius: 20px;
-            margin-bottom: 20px;
-            box-shadow: 3px 3px 5px #c1c1c1;
-        }
-        .section {
-            background-color: #fffaf0;
-            padding: 20px;
-            border-radius: 20px;
-            box-shadow: 3px 3px 5px #c1c1c1;
-            margin-bottom: 20px;
-            font-size: 1.2em;
-        }
-        .button {
-            background-color: #ffb6c1;
-            color: white;
-            font-size: 18px;
-            font-weight: bold;
-            padding: 15px;
-            border-radius: 20px;
-            border: none;
-            cursor: pointer;
-            width: 100%;
-        }
-        .button:hover {
-            background-color: #ff69b4;
-        }
-    </style>
+<style>
+    .main {
+        background-color: #f0f8ff;
+        padding: 20px;
+        border-radius: 10px;
+    }
+    .stButton>button {
+        background-color: #4CAF50;
+        color: white;
+        border: none;
+        border-radius: 5px;
+        padding: 10px 20px;
+    }
+    .stTextInput>div>div>input {
+        background-color: #e6f3ff;
+        border-radius: 5px;
+    }
+    h1 {
+        color: #2E8B57;
+        text-align: center;
+    }
+    h2 {
+        color: #4682B4;
+    }
+    .script-line {
+        background-color: white;
+        padding: 10px;
+        border-radius: 5px;
+        margin-bottom: 5px;
+    }
+</style>
 """, unsafe_allow_html=True)
 
-# Title of the application
-st.markdown("<h1>유아 놀이 관찰 기록 문장 생성 🎨</h1>", unsafe_allow_html=True)
+st.title("🕷️ Charlotte's Web Interactive Learning 🐷")
 
-# Instructions for users with a child-friendly card style
-st.markdown("""
-<div class="instructions">
-    <h3>사용 설명서 🖍️</h3>
-    <ul>
-        <li>👶 <b>이름</b>과 <b>영역</b>을 직접 입력하고, <b>관찰 누가기록</b>은 엑셀 파일을 통해 업로드하세요.</li>
-        <li>📄 엑셀 파일은 다음과 같은 컬럼을 포함해야 합니다: 관찰 누가기록 1~5.</li>
-        <li>⬇️ 아래 링크에서 <b>예시 파일</b>을 다운로드 받아 양식을 확인할 수 있습니다.</li>
-    </ul>
-</div>
-""", unsafe_allow_html=True)
+def text_to_speech(text):
+    # 브라우저 기반 TTS를 위한 JavaScript 사용
+    escaped_text = text.replace("'", "\\'").replace("\n", " ")
+    tts_html = f"""
+    <script>
+        var utterance = new SpeechSynthesisUtterance('{escaped_text}');
+        window.speechSynthesis.speak(utterance);
+    </script>
+    """
+    components.html(tts_html, height=0, width=0)
 
-# Provide a download link for the example Excel template
-st.markdown("""
-    [엑셀 양식 다운로드](https://docs.google.com/spreadsheets/d/1JmQdZnRNGNdwAWFhG0XcYHtwEuMgp8aQ/edit?usp=drive_link&ouid=109125530609256193549&rtpof=true&sd=true)
-""")
+def generate_response(prompt):
+    st.session_state.conversation_history.append({"role": "user", "content": prompt})
 
-# Optionally, show a preview of the template
-st.markdown("<h3>엑셀 파일 양식 미리보기 📄</h3>", unsafe_allow_html=True)
-
-# Example DataFrame that mimics the structure of the required Excel file
-example_df = pd.DataFrame({
-    '관찰 누가기록 1': ['기록 예시 1'],
-    '관찰 누가기록 2': ['기록 예시 2'],
-    '관찰 누가기록 3': ['기록 예시 3'],
-    '관찰 누가기록 4': ['기록 예시 4'],
-    '관찰 누가기록 5': ['기록 예시 5']
-})
-
-# Display the example DataFrame as a table
-st.dataframe(example_df)
-
-# Inputs for name and grade
-name_keyword = st.text_input("이름 🌼", placeholder="학생 이름을 입력해주세요.")
-grade_options = ["신체운동건강 🌞", "의사소통 📚", "사회관계 🤝", "예술경험 🎨", "자연탐구 🌳"]
-grade_keyword = st.selectbox("영역 선택 🎓", grade_options)
-
-# File uploader for Excel file
-uploaded_file = st.file_uploader("관찰 누가기록이 포함된 엑셀 파일을 업로드하세요 📂", type=["xlsx"])
-
-# Display the 'Generate' button at all times
-generate_button_clicked = st.button('생성하기', key='generate_button', help="아이의 관찰 기록을 생성합니다")
-
-# Process after the button is clicked
-if generate_button_clicked:
-    if uploaded_file and name_keyword and grade_keyword:
-        # Read the uploaded Excel file
-        df = pd.read_excel(uploaded_file)
-
-        # Check if the required columns exist in the uploaded file
-        required_columns = ['관찰 누가기록 1', '관찰 누가기록 2', '관찰 누가기록 3', '관찰 누가기록 4', '관찰 누가기록 5']
-        if all(column in df.columns for column in required_columns):
-            with st.spinner('생성 중입니다...'):
-                # Process each row in the Excel file
-                for index, row in df.iterrows():
-                    topic_keyword1 = row['관찰 누가기록 1']
-                    topic_keyword2 = row['관찰 누가기록 2']
-                    topic_keyword3 = row['관찰 누가기록 3']
-                    topic_keyword4 = row['관찰 누가기록 4']
-                    topic_keyword5 = row['관찰 누가기록 5']
-
-                    # Combine keywords into a single input
-                    keywords_combined = f"관찰 누가기록 1: {topic_keyword1}, 관찰 누가기록 2: {topic_keyword2}, 관찰 누가기록 3: {topic_keyword3}, " \
-                                        f"관찰 누가기록 4: {topic_keyword4}, 관찰 누가기록 5: {topic_keyword5}, 영역: {grade_keyword}, 이름: {name_keyword}"
-        
-        
-        # Create a chat completion request to OpenAI API"
-        
-        chat_completion = client.chat.completions.create(
-            
+    try:
+        chat_completion = openai.ChatCompletion.create(
+            model="gpt-4o",  # 또는 "gpt-4"로 변경 가능
             messages=[
-                {
-                    "role": "user",
-                    "content": keywords_combined,
-                },
-                {
-                    "role": "system",
-                    "content": 
-                         "당신은 유아놀이 관찰 전문가입니다. 입력된 관찰 누가기록과 영역을 바탕으로 유치원 학생의 입력된 이름을 넣어 놀이 관찰을 한 문단으로 기록해주세요 "
-                        "1. 입력된 관찰 누가기록을 모두 다 반영해서 생성해주세요."                      
-                        "2. 영역에 맞게 10 문장 정도 생성 해주세요. "
-                        "3. 만4세 기준으로 학생의 놀이 활동이 너무 어렵지 않았으면 좋겠습니다."
-                        "4. 이것은 꼭 지켜야해 놀이관찰 기록과 전문가의 평가 모든 내용 꼭 한 문단 안에 기록되어야 한다."
-                        "5. 꼭 한 문단 안에 모든 내용이 들어가야 한단다. " 
-                        "6. 놀이 관찰 기록 문단 안에 전문가의 평가라는 단어는 들어가면 안된다."
-                        "7. 놀이 관찰 기록이 꼭 긍정적으로 나올 필요는 없단다."
-                        "8. 관찰 누가기록과 영역의 관련성을 높이면 좋겠어."
-                        "9. 누가기록, 첫번째 두번째와 같은 순서를 넣어서는 표현하지 말아주세요. 그리고 문장이 자연스럽게 이어지도록 표현해주세요"
-    
-                    
-                }
-            ],
-            model="gpt-4o",
+                {"role": "system", "content": "You are an AI tutor helping a student learn English through the story of Charlotte's Web. Provide explanations, answer questions, and engage in dialogue about the story, characters, and language used. Keep your responses appropriate for young learners."},
+                *st.session_state.conversation_history
+            ]
         )
 
-        # Extract the generated content
-        result = chat_completion.choices[0].message.content
+        ai_response = chat_completion.choices[0].message.content.strip()
+        st.session_state.conversation_history.append({"role": "assistant", "content": ai_response})
+        return ai_response
+    except Exception as e:
+        st.error(f"An error occurred: {str(e)}")
+        return "I'm sorry, I encountered an error. Please try again."
 
-        # Display the result in Streamlit app
-        st.write(f"**{name_keyword}**의 관찰 기록:")
-        st.write(result)
-        st.write("---")
+def evaluate_speech_accuracy(original_text, recognized_text):
+    similarity = SequenceMatcher(None, original_text.lower(), recognized_text.lower()).ratio()
+    return similarity * 100
+
+st.sidebar.header("Full Script")
+for i, line in enumerate(initial_script):
+    st.sidebar.markdown(f'<div class="script-line">{line}</div>', unsafe_allow_html=True)
+    if st.sidebar.button(f"🔊 Listen", key=f"listen_{i}"):
+        text_to_speech(line)
+
+# 순차적 듣기 기능 복원
+st.header("🎧 Sequential Listening")
+col1, col2, col3 = st.columns(3)
+with col1:
+    if st.button("⏮️ Previous line") and st.session_state.current_line > 0:
+        st.session_state.current_line -= 1
+
+with col2:
+    if st.button("▶️ Listen to current line"):
+        text_to_speech(initial_script[st.session_state.current_line])
+
+with col3:
+    if st.button("⏭️ Next line") and st.session_state.current_line < len(initial_script) - 1:
+        st.session_state.current_line += 1
+
+st.info(f"Current line: {initial_script[st.session_state.current_line]}")
+
+# 대화형 학습 섹션
+st.header("💬 Interactive Learning")
+user_input = st.text_input("Ask a question about the story, characters, or language:")
+
+if st.button("🚀 Submit") and user_input:
+    with st.spinner("AI Tutor is thinking..."):
+        ai_response = generate_response(user_input)
+    st.success("AI Tutor: " + ai_response)
+    if st.button("🔊 Listen to AI response"):
+        text_to_speech(ai_response)
+
+st.header("📜 Conversation History")
+for message in st.session_state.conversation_history:
+    if message['role'] == 'user':
+        st.markdown(f"**You:** {message['content']}")
     else:
-        st.error("엑셀 파일에 필요한 모든 관찰 누가기록이 컬럼이 포함되어 있지 않습니다.")
+        st.markdown(f"**AI Tutor:** {message['content']}")
